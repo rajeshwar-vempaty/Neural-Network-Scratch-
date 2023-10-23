@@ -72,7 +72,21 @@ Run Jupyter Notebook:
 ```bash
 jupyter notebook
 ```
-
+#### 6. Usage
 Open the notebook `Neural_Network_Scratch.ipynb` and run all the cells to see the project in action.
+
+#### 7. Structure
+The notebook contains the following sections:
+
+**Data Preprocessing:** Steps to prepare the data for training.
+
+**Model Architecture:** Explanation and code for the neural network architecture.
+
+**Training:** Code and parameters for training the model.
+
+**Evaluation:** Methods and metrics used to evaluate the model performance.
+
+#### 8. Contributing
+Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
 
 
