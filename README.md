@@ -1,92 +1,219 @@
-# Neural-Network-Scratch-
-## Overview
-This repository contains a Jupyter notebook that demonstrates how to implement a neural network from scratch. The notebook is designed to provide a comprehensive guide to understand the underlying mechanics of neural networks, without using any machine learning frameworks.
+# Neural Network From Scratch - Interactive Visualization
 
-## Installation
+## Overview
+
+This repository demonstrates how to implement a neural network from scratch with **interactive 3Blue1Brown-inspired visualizations**. Watch neurons fire, weights change, and data flow through the network in real-time!
+
+### Features
+
+- **Interactive Network Visualization**: See neurons, connections, and weights with beautiful color-coded graphics
+- **Real-time Training**: Watch the network learn step-by-step or in batches
+- **Forward Propagation Animation**: See how data flows through each layer
+- **Custom Input Testing**: Provide your own inputs and see predictions
+- **Weight Evolution**: Visualize how weights change during training
+- **Flexible Architecture**: Build networks with any number of layers and neurons
+
+## Quick Start
 
 ### Prerequisites
 
-Before you begin, ensure you have met the following requirements:
+- Python 3.x
+- pip (Python package installer)
 
-- **Python 3.x**: The code is written in Python 3. You can download it [here](https://www.python.org/downloads/).
-- **pip**: The Python package installer. Usually comes bundled with Python 3.x.
-- **Virtual Environment (Optional)**: This is recommended for isolating project dependencies. You can use `venv` or `conda` to create a virtual environment.
-
-### Step-by-Step Guide
-
-#### 1. Clone the Repository
-
-First, clone the repository to your local machine. Open your command prompt (Windows) or terminal (macOS/Linux), navigate to the folder where you want to store the project, and run:
+### Installation
 
 ```bash
-git clone https://github.com/YourUsername/YourRepositoryName.git
+# Clone the repository
+git clone https://github.com/rajeshwar-vempaty/Neural-Network-Scratch-.git
+cd Neural-Network-Scratch-
+
+# Install dependencies
+pip install numpy matplotlib ipywidgets jupyter
+
+# For interactive widgets in Jupyter Lab
+pip install ipympl
+jupyter labextension install @jupyter-widgets/jupyterlab-manager
 ```
 
-#### 2. Navigate to the Project Folder
+### Running the Interactive Visualization
 
-Change your current directory to the cloned repository:
+#### Option 1: Jupyter Notebook (Recommended)
 
 ```bash
-cd YourRepositoryName
+jupyter notebook Interactive_Neural_Network_Demo.ipynb
 ```
 
-#### 3. Create a Virtual Environment (Optional)
+This opens an interactive dashboard where you can:
+- Train the network with sliders to control learning rate
+- Watch weights and activations update in real-time
+- Test custom inputs and see predictions
+- View training progress with loss and accuracy curves
 
-To create a virtual environment, run:
+#### Option 2: Python Script
 
 ```bash
-# Using venv
-python3 -m venv your-env-name
+# Run interactive matplotlib visualization
+python interactive_neural_network.py
 
-# Using conda
-conda create --name your-env-name python=3.x
+# Run forward propagation animation
+python interactive_neural_network.py --animate
 ```
 
-Activate the virtual environment:
+#### Option 3: Original Basic Notebook
 
 ```bash
-# Using venv (Windows)
-your-env-name\Scripts\Activate
-
-# Using venv (macOS/Linux)
-source your-env-name/bin/activate
-
-# Using conda
-conda activate your-env-name
+jupyter notebook Neural_Network_Scratch.ipynb
 ```
 
-#### 4. Install Dependencies
+## Project Structure
 
-Install the required packages using `pip`:
-
-```bash
-pip install -r requirements.txt
+```
+Neural-Network-Scratch-/
+│
+├── README.md                           # This file
+├── interactive_neural_network.py       # Standalone interactive visualization
+├── Interactive_Neural_Network_Demo.ipynb  # Full interactive Jupyter demo
+└── Neural_Network_Scratch.ipynb        # Original basic implementation
 ```
 
-If you don't have a `requirements.txt` file, you should manually install the necessary libraries mentioned in the notebook or code.
+## Interactive Features Guide
 
-#### 5. Launch Jupyter Notebook
+### 1. Network Visualization
 
-Run Jupyter Notebook:
+The visualization uses a 3Blue1Brown-inspired color scheme:
+- **Blue connections**: Positive weights (enhance signals)
+- **Red connections**: Negative weights (inhibit signals)
+- **Line thickness**: Weight magnitude (thicker = stronger)
+- **Neuron brightness**: Activation level (brighter = higher activation)
 
-```bash
-jupyter notebook
+### 2. Interactive Controls
+
+| Control | Function |
+|---------|----------|
+| Learning Rate Slider | Adjust how fast the network learns |
+| Sample Index Slider | View different training samples |
+| Weight Layer Slider | Inspect weights between different layers |
+| Train Button | Train for multiple epochs |
+| Step Button | Train for a single step |
+| Reset Button | Reinitialize all weights |
+| Forward Pass | Test custom input values |
+
+### 3. Step-by-Step Forward Propagation
+
+Watch data flow through the network:
+```python
+from interactive_neural_network import NeuralNetwork, ForwardPropagationAnimator, NetworkVisualizer
+
+# Create network
+nn = NeuralNetwork([4, 6, 4, 1])
+
+# Create visualizer and animator
+viz = NetworkVisualizer(nn)
+animator = ForwardPropagationAnimator(nn, viz)
+
+# Animate forward pass
+animator.animate_forward_pass([0.5, 0.8, 0.2, 0.9], interval=800)
 ```
-#### 6. Usage
-Open the notebook `Neural_Network_Scratch.ipynb` and run all the cells to see the project in action.
 
-#### 7. Structure
-The notebook contains the following sections:
+### 4. Custom Network Architecture
 
-**Data Preprocessing:** Steps to prepare the data for training.
+Build your own network:
+```python
+from interactive_neural_network import NeuralNetwork, NetworkVisualizer
 
-**Model Architecture:** Explanation and code for the neural network architecture.
+# Create a deep network
+nn = NeuralNetwork(
+    layer_sizes=[8, 16, 12, 8, 4, 1],  # Custom architecture
+    activation='relu',                  # Options: 'sigmoid', 'relu', 'tanh'
+    weight_init='xavier'                # Options: 'random', 'xavier', 'he'
+)
 
-**Training:** Code and parameters for training the model.
+# Visualize
+viz = NetworkVisualizer(nn)
+viz.create_interactive_visualization(X_data, y_data)
+```
 
-**Evaluation:** Methods and metrics used to evaluate the model performance.
+## Understanding the Visualization
 
-#### 8. Contributing
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+### What the Colors Mean
 
+| Element | Color | Meaning |
+|---------|-------|---------|
+| Connections | Blue | Positive weight (enhances signal) |
+| Connections | Red | Negative weight (inhibits signal) |
+| Neurons | Bright blue | High activation (neuron is "firing") |
+| Neurons | Dark blue | Low activation (neuron is quiet) |
+| Input layer edge | Purple | Input neurons |
+| Output layer edge | Green | Output neurons |
 
+### Training Curves
+
+- **Loss Curve**: Should decrease over time (network is learning)
+- **Accuracy Curve**: Should increase over time (better predictions)
+
+## Examples
+
+### Basic Training Loop
+
+```python
+from interactive_neural_network import NeuralNetwork, create_sample_data
+
+# Create data
+X, y = create_sample_data(n_samples=200, n_features=4)
+
+# Create network
+nn = NeuralNetwork([4, 8, 4, 1], activation='sigmoid')
+
+# Train
+for epoch in range(1000):
+    loss, acc = nn.train_step(X, y, learning_rate=0.1)
+    if epoch % 100 == 0:
+        print(f"Epoch {epoch}: Loss={loss:.4f}, Accuracy={acc:.4f}")
+```
+
+### Making Predictions
+
+```python
+import numpy as np
+
+# After training
+test_input = np.array([[0.5, 0.3, 0.8, 0.2]])
+prediction = nn.forward(test_input)
+print(f"Prediction: {prediction[0,0]:.4f}")
+print(f"Class: {'1' if prediction >= 0.5 else '0'}")
+```
+
+## Key Concepts Demonstrated
+
+1. **Forward Propagation**: How inputs are transformed layer by layer
+2. **Backpropagation**: How errors are propagated back to update weights
+3. **Gradient Descent**: How weights are adjusted to minimize loss
+4. **Activation Functions**: How neurons decide whether to "fire"
+5. **Weight Initialization**: Why starting weights matter
+6. **Learning Rate**: How step size affects learning
+
+## Dependencies
+
+- `numpy`: Numerical computations
+- `matplotlib`: Visualization
+- `ipywidgets`: Interactive controls (Jupyter)
+- `ipympl`: Interactive matplotlib backend for Jupyter
+
+## Contributing
+
+Pull requests are welcome! Some ideas for contributions:
+
+- Add more activation functions (LeakyReLU, Softmax, etc.)
+- Implement regularization (L1, L2, Dropout)
+- Add more optimizers (Adam, RMSprop, etc.)
+- Create decision boundary visualizations
+- Add convolutional layer visualization
+
+## License
+
+This project is open source and available for educational purposes.
+
+## Acknowledgments
+
+- Inspired by [3Blue1Brown's Neural Network series](https://www.youtube.com/playlist?list=PLZHQObOWTQDNU6R1_67000Dx_ZCJB-3pi)
+- Built from scratch to understand the fundamentals
