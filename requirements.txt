@@ -1,0 +1,7 @@
+numpy>=1.19.0
+matplotlib>=3.3.0
+ipywidgets>=7.5.0
+jupyter>=1.0.0
+pandas>=1.0.0
+scikit-learn>=0.24.0
+ipympl>=0.7.0
