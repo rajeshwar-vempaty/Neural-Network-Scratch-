@@ -214,6 +214,7 @@ class NetworkVisualizer:
     """
     3Blue1Brown-inspired neural network visualizer.
     Shows neurons, connections, weights, and activations in real-time.
+    Optimized for fast incremental updates.
     """
 
     def __init__(self, network, figsize=(16, 10)):
@@ -240,6 +241,14 @@ class NetworkVisualizer:
 
         # Neuron positions
         self.neuron_positions = self._compute_neuron_positions()
+
+        # Cached artists for incremental updates (performance optimization)
+        self._connection_lines = []  # List of Line2D objects
+        self._neuron_circles = []    # List of Circle patches
+        self._neuron_texts = []      # List of Text objects
+        self._highlight_circles = [] # List of highlight Circle patches
+        self._artists_initialized = False
+        self._cached_max_weight = None
 
     def _compute_neuron_positions(self):
         """Compute x, y positions for each neuron."""
@@ -289,10 +298,158 @@ class NetworkVisualizer:
 
         return (r, g, b, 0.9)
 
+    def _initialize_artists(self, ax, show_weights=True):
+        """Initialize all matplotlib artists once for incremental updates."""
+        self._connection_lines = []
+        self._neuron_circles = []
+        self._neuron_texts = []
+        self._highlight_circles = []
+        self._layer_labels = []
+
+        neuron_radius = 0.035
+
+        # Create connection lines
+        if show_weights:
+            for layer_idx in range(len(self.network.weights)):
+                for i, pos1 in enumerate(self.neuron_positions[layer_idx]):
+                    for j, pos2 in enumerate(self.neuron_positions[layer_idx + 1]):
+                        line, = ax.plot([pos1[0], pos2[0]], [pos1[1], pos2[1]],
+                                       color='gray', linewidth=1, alpha=0.6, zorder=1)
+                        self._connection_lines.append({
+                            'line': line,
+                            'layer_idx': layer_idx,
+                            'from_idx': i,
+                            'to_idx': j,
+                            'pos1': pos1,
+                            'pos2': pos2
+                        })
+
+        # Create neuron circles and texts
+        for layer_idx, layer_positions in enumerate(self.neuron_positions):
+            for neuron_idx, (x, y) in enumerate(layer_positions):
+                # Highlight circle (initially invisible)
+                highlight_circle = Circle((x, y), neuron_radius + 0.008,
+                                        facecolor=self.highlight_color,
+                                        edgecolor=self.highlight_color, linewidth=3,
+                                        zorder=4, visible=False)
+                ax.add_patch(highlight_circle)
+                self._highlight_circles.append({
+                    'circle': highlight_circle,
+                    'layer_idx': layer_idx,
+                    'neuron_idx': neuron_idx
+                })
+
+                # Neuron circle
+                circle = Circle((x, y), neuron_radius, facecolor=(0.3, 0.5, 0.7, 0.9),
+                               edgecolor='white', linewidth=2, zorder=5)
+                ax.add_patch(circle)
+                self._neuron_circles.append({
+                    'circle': circle,
+                    'layer_idx': layer_idx,
+                    'neuron_idx': neuron_idx
+                })
+
+                # Value text
+                text = ax.text(x, y, '', ha='center', va='center',
+                              fontsize=8, color='white', fontweight='bold', zorder=6)
+                self._neuron_texts.append({
+                    'text': text,
+                    'layer_idx': layer_idx,
+                    'neuron_idx': neuron_idx
+                })
+
+        # Create layer labels (static, don't need updating)
+        layer_names = ['Input'] + [f'Hidden {i+1}' for i in range(len(self.network.layer_sizes) - 2)] + ['Output']
+        for idx, name in enumerate(layer_names):
+            x = idx / (len(self.network.layer_sizes) - 1) if len(self.network.layer_sizes) > 1 else 0.5
+            ax.text(x, -0.02, name, ha='center', va='top', fontsize=11,
+                   color=self.text_color, fontweight='bold')
+            n_neurons = self.network.layer_sizes[idx]
+            neuron_text = f'{n_neurons} neuron' if n_neurons == 1 else f'{n_neurons} neurons'
+            ax.text(x, 1.02, neuron_text,
+                   ha='center', va='bottom', fontsize=9, color=self.text_color, alpha=0.7)
+
+        self._artists_initialized = True
+
+    def _update_artists(self, show_weights=True, show_values=True, highlight_path=None):
+        """Update existing artists with new values (fast incremental update)."""
+        # Convert highlight_path to set for O(1) lookup
+        highlight_set = set(highlight_path) if highlight_path else set()
+        highlight_edges = set()
+        if highlight_path:
+            for k in range(len(highlight_path) - 1):
+                highlight_edges.add((highlight_path[k], highlight_path[k+1]))
+
+        # Update max weight (cache it for performance)
+        max_weight = max(np.abs(w).max() for w in self.network.weights) if self.network.weights else 1
+
+        # Update connection lines
+        if show_weights:
+            for conn in self._connection_lines:
+                line = conn['line']
+                layer_idx = conn['layer_idx']
+                i, j = conn['from_idx'], conn['to_idx']
+
+                weight = self.network.weights[layer_idx][i, j]
+                color = self._get_weight_color(weight, max_weight)
+                linewidth = 0.5 + 2.5 * abs(weight) / max_weight
+
+                # Check highlight using set (O(1) lookup)
+                edge = ((layer_idx, i), (layer_idx + 1, j))
+                is_highlighted = edge in highlight_edges
+
+                if is_highlighted:
+                    line.set_color(self.highlight_color)
+                    line.set_linewidth(linewidth + 2)
+                    line.set_alpha(0.9)
+                    line.set_zorder(2)
+                else:
+                    line.set_color(color)
+                    line.set_linewidth(linewidth)
+                    line.set_alpha(0.6)
+                    line.set_zorder(1)
+
+        # Update neuron circles and texts
+        for i, (circle_data, text_data, highlight_data) in enumerate(
+            zip(self._neuron_circles, self._neuron_texts, self._highlight_circles)):
+
+            layer_idx = circle_data['layer_idx']
+            neuron_idx = circle_data['neuron_idx']
+            circle = circle_data['circle']
+            text = text_data['text']
+            highlight_circle = highlight_data['circle']
+
+            # Get activation value
+            if self.network.activations and layer_idx < len(self.network.activations):
+                activation = self.network.activations[layer_idx]
+                if activation.shape[0] > 0:
+                    value = float(activation[0, neuron_idx]) if activation.ndim > 1 else float(activation[neuron_idx])
+                    color = self._get_activation_color(value)
+                else:
+                    value = 0
+                    color = self._get_activation_color(0)
+            else:
+                value = 0
+                color = (0.3, 0.5, 0.7, 0.9)
+
+            # Update circle color
+            circle.set_facecolor(color)
+
+            # Update highlight visibility
+            is_highlighted = (layer_idx, neuron_idx) in highlight_set
+            highlight_circle.set_visible(is_highlighted)
+
+            # Update text
+            if show_values and self.network.activations:
+                text.set_text(f'{value:.2f}')
+            else:
+                text.set_text('')
+
     def draw_network(self, ax, show_weights=True, show_values=True,
-                     input_values=None, highlight_path=None):
+                     input_values=None, highlight_path=None, force_redraw=False):
         """
         Draw the neural network on the given axes.
+        Uses incremental updates for better performance.
 
         Parameters:
         -----------
@@ -306,93 +463,34 @@ class NetworkVisualizer:
             Input values to propagate through network
         highlight_path : list
             List of (layer, neuron) tuples to highlight
+        force_redraw : bool
+            Force complete redraw (slower but necessary after reset)
         """
-        ax.clear()
-        ax.set_facecolor(self.background_color)
-        ax.set_xlim(-0.15, 1.15)
-        ax.set_ylim(-0.05, 1.05)
-        ax.axis('off')
-
         # If input values provided, do forward pass
         if input_values is not None:
             if input_values.ndim == 1:
                 input_values = input_values.reshape(1, -1)
             self.network.forward(input_values, store=True)
 
-        # Get max weight for normalization
-        max_weight = max(np.abs(w).max() for w in self.network.weights) if self.network.weights else 1
+        # Initialize or reinitialize artists if needed
+        if not self._artists_initialized or force_redraw:
+            ax.clear()
+            ax.set_facecolor(self.background_color)
+            ax.set_xlim(-0.15, 1.15)
+            ax.set_ylim(-0.05, 1.05)
+            ax.axis('off')
+            self._initialize_artists(ax, show_weights)
 
-        # Draw connections (weights)
-        if show_weights:
-            for layer_idx in range(len(self.network.weights)):
-                weights = self.network.weights[layer_idx]
-                for i, pos1 in enumerate(self.neuron_positions[layer_idx]):
-                    for j, pos2 in enumerate(self.neuron_positions[layer_idx + 1]):
-                        weight = weights[i, j]
-                        color = self._get_weight_color(weight, max_weight)
-                        linewidth = 0.5 + 2.5 * abs(weight) / max_weight
+        # Fast incremental update
+        self._update_artists(show_weights, show_values, highlight_path)
 
-                        # Check if this connection should be highlighted
-                        is_highlighted = False
-                        if highlight_path:
-                            for k in range(len(highlight_path) - 1):
-                                if (highlight_path[k] == (layer_idx, i) and
-                                    highlight_path[k+1] == (layer_idx + 1, j)):
-                                    is_highlighted = True
-                                    break
-
-                        if is_highlighted:
-                            ax.plot([pos1[0], pos2[0]], [pos1[1], pos2[1]],
-                                   color=self.highlight_color, linewidth=linewidth + 2,
-                                   alpha=0.9, zorder=2)
-
-                        ax.plot([pos1[0], pos2[0]], [pos1[1], pos2[1]],
-                               color=color, linewidth=linewidth, alpha=0.6, zorder=1)
-
-        # Draw neurons
-        neuron_radius = 0.035
-        for layer_idx, layer_positions in enumerate(self.neuron_positions):
-            for neuron_idx, (x, y) in enumerate(layer_positions):
-                # Get activation value if available
-                if self.network.activations and layer_idx < len(self.network.activations):
-                    activation = self.network.activations[layer_idx]
-                    if activation.shape[0] > 0:
-                        value = float(activation[0, neuron_idx]) if activation.ndim > 1 else float(activation[neuron_idx])
-                        color = self._get_activation_color(value)
-                    else:
-                        value = 0
-                        color = self._get_activation_color(0)
-                else:
-                    value = 0
-                    color = (0.3, 0.5, 0.7, 0.9)
-
-                # Check if neuron is highlighted
-                is_highlighted = highlight_path and (layer_idx, neuron_idx) in highlight_path
-
-                # Draw neuron circle
-                if is_highlighted:
-                    highlight_circle = Circle((x, y), neuron_radius + 0.008,
-                                            facecolor=self.highlight_color,
-                                            edgecolor=self.highlight_color, linewidth=3, zorder=4)
-                    ax.add_patch(highlight_circle)
-
-                circle = Circle((x, y), neuron_radius, facecolor=color,
-                               edgecolor='white', linewidth=2, zorder=5)
-                ax.add_patch(circle)
-
-                # Show value inside neuron
-                if show_values and self.network.activations:
-                    ax.text(x, y, f'{value:.2f}', ha='center', va='center',
-                           fontsize=8, color='white', fontweight='bold', zorder=6)
-
-        # Draw layer labels
-        layer_names = ['Input'] + [f'Hidden {i+1}' for i in range(len(self.network.layer_sizes) - 2)] + ['Output']
-        for idx, name in enumerate(layer_names):
-            x = idx / (len(self.network.layer_sizes) - 1) if len(self.network.layer_sizes) > 1 else 0.5
-            ax.text(x, -0.02, name, ha='center', va='top', fontsize=11,
-                   color=self.text_color, fontweight='bold')
-            ax.text(x, 1.02, f'{self.network.layer_sizes[idx]} neurons',
-                   ha='center', va='bottom', fontsize=9, color=self.text_color, alpha=0.7)
+    def reset_artists(self):
+        """Reset cached artists (call after network reset)."""
+        self._artists_initialized = False
+        self._connection_lines = []
+        self._neuron_circles = []
+        self._neuron_texts = []
+        self._highlight_circles = []
 
     def draw_weight_matrix(self, ax, layer_idx=0):
         """Draw weight matrix as a heatmap."""
@@ -420,6 +518,7 @@ class NetworkVisualizer:
     def create_interactive_visualization(self, X_data=None, y_data=None):
         """
         Create a fully interactive visualization with sliders and controls.
+        Optimized for fast, responsive interactions.
 
         Parameters:
         -----------
@@ -432,58 +531,85 @@ class NetworkVisualizer:
         plt.style.use('dark_background')
         fig = plt.figure(figsize=self.figsize, facecolor=self.background_color)
 
-        # Main network visualization
-        ax_network = fig.add_axes([0.05, 0.35, 0.55, 0.6])
+        # Improved layout with better spacing
+        # Main network visualization - larger area
+        ax_network = fig.add_axes([0.03, 0.32, 0.58, 0.62])
 
-        # Training curves
-        ax_loss = fig.add_axes([0.65, 0.55, 0.3, 0.2])
-        ax_accuracy = fig.add_axes([0.65, 0.78, 0.3, 0.17])
+        # Training curves - better positioned
+        ax_accuracy = fig.add_axes([0.66, 0.72, 0.31, 0.22])
+        ax_loss = fig.add_axes([0.66, 0.48, 0.31, 0.20])
 
         # Weight matrix visualization
-        ax_weights = fig.add_axes([0.65, 0.35, 0.3, 0.15])
+        ax_weights = fig.add_axes([0.66, 0.32, 0.31, 0.13])
 
-        # Sliders area
-        ax_lr = fig.add_axes([0.2, 0.22, 0.3, 0.03])
-        ax_layer = fig.add_axes([0.2, 0.17, 0.3, 0.03])
-        ax_sample = fig.add_axes([0.2, 0.12, 0.3, 0.03])
+        # Sliders area - improved spacing
+        ax_lr = fig.add_axes([0.15, 0.22, 0.35, 0.025])
+        ax_layer = fig.add_axes([0.15, 0.17, 0.35, 0.025])
+        ax_sample = fig.add_axes([0.15, 0.12, 0.35, 0.025])
 
-        # Buttons
-        ax_train_btn = fig.add_axes([0.6, 0.17, 0.12, 0.05])
-        ax_step_btn = fig.add_axes([0.6, 0.11, 0.12, 0.05])
-        ax_reset_btn = fig.add_axes([0.75, 0.17, 0.12, 0.05])
-        ax_forward_btn = fig.add_axes([0.75, 0.11, 0.12, 0.05])
+        # Buttons - better organized
+        ax_train_btn = fig.add_axes([0.58, 0.19, 0.13, 0.045])
+        ax_step_btn = fig.add_axes([0.58, 0.12, 0.13, 0.045])
+        ax_reset_btn = fig.add_axes([0.74, 0.19, 0.13, 0.045])
+        ax_forward_btn = fig.add_axes([0.74, 0.12, 0.13, 0.045])
+
+        # Status/progress text area
+        ax_status = fig.add_axes([0.58, 0.06, 0.29, 0.04])
+        ax_status.axis('off')
+        status_text = ax_status.text(0.5, 0.5, '', ha='center', va='center',
+                                     fontsize=10, color=self.highlight_color,
+                                     transform=ax_status.transAxes)
 
         # Input text boxes
-        ax_input = fig.add_axes([0.2, 0.05, 0.5, 0.04])
+        ax_input = fig.add_axes([0.15, 0.05, 0.38, 0.035])
 
-        # Create widgets
-        slider_lr = Slider(ax_lr, 'Learning Rate', 0.001, 0.5, valinit=0.01, valstep=0.001)
+        # Create widgets with improved styling
+        slider_lr = Slider(ax_lr, 'Learning Rate', 0.001, 0.5, valinit=0.1, valstep=0.005,
+                          color=self.positive_color)
         slider_lr.label.set_color(self.text_color)
+        slider_lr.valtext.set_color(self.text_color)
 
         max_layers = max(1, len(self.network.weights) - 1)
-        slider_layer = Slider(ax_layer, 'Weight Layer', 0, max_layers, valinit=0, valstep=1)
+        slider_layer = Slider(ax_layer, 'Weight Layer', 0, max_layers, valinit=0, valstep=1,
+                             color=self.positive_color)
         slider_layer.label.set_color(self.text_color)
+        slider_layer.valtext.set_color(self.text_color)
 
         n_samples = X_data.shape[0] if X_data is not None else 1
-        slider_sample = Slider(ax_sample, 'Sample Index', 0, max(0, n_samples - 1), valinit=0, valstep=1)
+        slider_sample = Slider(ax_sample, 'Sample Index', 0, max(0, n_samples - 1), valinit=0, valstep=1,
+                              color=self.positive_color)
         slider_sample.label.set_color(self.text_color)
+        slider_sample.valtext.set_color(self.text_color)
 
         btn_train = Button(ax_train_btn, 'Train 100 epochs', color='#2ecc71', hovercolor='#27ae60')
-        btn_step = Button(ax_step_btn, 'Train 1 step', color='#3498db', hovercolor='#2980b9')
+        btn_step = Button(ax_step_btn, 'Train 10 steps', color='#3498db', hovercolor='#2980b9')
         btn_reset = Button(ax_reset_btn, 'Reset Network', color='#e74c3c', hovercolor='#c0392b')
         btn_forward = Button(ax_forward_btn, 'Forward Pass', color='#9b59b6', hovercolor='#8e44ad')
 
-        text_input = TextBox(ax_input, 'Custom Input (comma-separated): ',
+        text_input = TextBox(ax_input, 'Custom Input: ',
                             initial=','.join(['0.5'] * self.network.layer_sizes[0]))
+
+        # Cached line objects for training curves (performance optimization)
+        loss_line = None
+        accuracy_line = None
 
         # State
         state = {
             'epoch': 0,
-            'learning_rate': 0.01
+            'learning_rate': 0.1,
+            'is_training': False
         }
 
-        def update_display():
-            """Update all visualizations."""
+        def update_status(message):
+            """Update status text."""
+            status_text.set_text(message)
+            fig.canvas.draw_idle()
+            fig.canvas.flush_events()
+
+        def update_display(force_redraw=False, update_graphs=True):
+            """Update all visualizations with optimized rendering."""
+            nonlocal loss_line, accuracy_line
+
             # Get current sample
             sample_idx = int(slider_sample.val)
             if X_data is not None and sample_idx < X_data.shape[0]:
@@ -491,82 +617,125 @@ class NetworkVisualizer:
             else:
                 current_input = np.array([[0.5] * self.network.layer_sizes[0]])
 
-            # Draw network
-            self.draw_network(ax_network, input_values=current_input, show_weights=True, show_values=True)
-            ax_network.set_title(f'Neural Network Architecture | Epoch: {state["epoch"]}',
+            # Draw network (uses incremental updates internally)
+            self.draw_network(ax_network, input_values=current_input,
+                            show_weights=True, show_values=True, force_redraw=force_redraw)
+            ax_network.set_title(f'Neural Network | Epoch: {state["epoch"]}',
                                color=self.text_color, fontsize=14, fontweight='bold', pad=10)
 
-            # Draw weight matrix
-            layer_idx = int(slider_layer.val)
-            self.draw_weight_matrix(ax_weights, layer_idx)
+            # Draw weight matrix (only when needed)
+            if update_graphs:
+                layer_idx = int(slider_layer.val)
+                self.draw_weight_matrix(ax_weights, layer_idx)
 
-            # Draw training curves
-            ax_loss.clear()
-            ax_loss.set_facecolor(self.background_color)
-            if self.network.loss_history:
-                ax_loss.plot(self.network.loss_history, color='#e74c3c', linewidth=2)
-                ax_loss.set_title('Loss', color=self.text_color, fontsize=10)
+            # Update training curves efficiently
+            if update_graphs:
+                # Update loss plot
+                ax_loss.clear()
+                ax_loss.set_facecolor(self.background_color)
+                if self.network.loss_history:
+                    ax_loss.plot(self.network.loss_history, color='#e74c3c', linewidth=1.5)
+                    current_loss = self.network.loss_history[-1]
+                    ax_loss.set_title(f'Loss: {current_loss:.4f}', color=self.text_color, fontsize=10)
+                else:
+                    ax_loss.set_title('Loss', color=self.text_color, fontsize=10)
                 ax_loss.set_xlabel('Epoch', color=self.text_color, fontsize=8)
-                ax_loss.tick_params(colors=self.text_color)
+                ax_loss.tick_params(colors=self.text_color, labelsize=7)
                 ax_loss.grid(True, alpha=0.2)
 
-            ax_accuracy.clear()
-            ax_accuracy.set_facecolor(self.background_color)
-            if self.network.accuracy_history:
-                ax_accuracy.plot(self.network.accuracy_history, color='#2ecc71', linewidth=2)
-                ax_accuracy.set_title('Accuracy', color=self.text_color, fontsize=10)
-                ax_accuracy.tick_params(colors=self.text_color)
+                # Update accuracy plot
+                ax_accuracy.clear()
+                ax_accuracy.set_facecolor(self.background_color)
+                if self.network.accuracy_history:
+                    ax_accuracy.plot(self.network.accuracy_history, color='#2ecc71', linewidth=1.5)
+                    current_acc = self.network.accuracy_history[-1]
+                    ax_accuracy.set_title(f'Accuracy: {current_acc:.2%}', color=self.text_color, fontsize=10)
+                else:
+                    ax_accuracy.set_title('Accuracy', color=self.text_color, fontsize=10)
+                ax_accuracy.tick_params(colors=self.text_color, labelsize=7)
                 ax_accuracy.grid(True, alpha=0.2)
-                ax_accuracy.set_ylim(0, 1)
+                ax_accuracy.set_ylim(0, 1.05)
 
             fig.canvas.draw_idle()
 
         def on_train(event):
-            """Train for 100 epochs."""
+            """Train for 100 epochs with batched updates."""
             if X_data is not None and y_data is not None:
+                state['is_training'] = True
                 lr = slider_lr.val
-                for _ in range(100):
+                total_epochs = 100
+                update_interval = 10  # Update display every N epochs
+
+                update_status(f'Training... 0/{total_epochs}')
+                fig.canvas.flush_events()
+
+                for i in range(total_epochs):
                     loss, acc = self.network.train_step(X_data, y_data, lr)
                     self.network.loss_history.append(loss)
                     self.network.accuracy_history.append(acc)
                     state['epoch'] += 1
+
+                    # Update display at intervals for smoother performance
+                    if (i + 1) % update_interval == 0:
+                        update_status(f'Training... {i+1}/{total_epochs} | Loss: {loss:.4f}')
+                        update_display(update_graphs=True)
+                        fig.canvas.flush_events()
+
+                state['is_training'] = False
+                update_status(f'Done! Final Loss: {loss:.4f}, Acc: {acc:.2%}')
                 update_display()
 
         def on_step(event):
-            """Train for 1 step."""
+            """Train for 10 steps."""
             if X_data is not None and y_data is not None:
                 lr = slider_lr.val
-                loss, acc = self.network.train_step(X_data, y_data, lr)
-                self.network.loss_history.append(loss)
-                self.network.accuracy_history.append(acc)
-                state['epoch'] += 1
+                for _ in range(10):
+                    loss, acc = self.network.train_step(X_data, y_data, lr)
+                    self.network.loss_history.append(loss)
+                    self.network.accuracy_history.append(acc)
+                    state['epoch'] += 1
+                update_status(f'Step complete | Loss: {loss:.4f}, Acc: {acc:.2%}')
                 update_display()
 
         def on_reset(event):
             """Reset the network."""
             layer_sizes = self.network.layer_sizes
-            self.network.__init__(layer_sizes)
+            activation = self.network.activation_name
+            self.network.__init__(layer_sizes, activation=activation)
+            self.reset_artists()  # Reset cached artists
             state['epoch'] = 0
-            update_display()
+            update_status('Network reset!')
+            update_display(force_redraw=True)
 
         def on_forward(event):
             """Perform forward pass with custom input."""
             try:
-                values = [float(x.strip()) for x in text_input.text.split(',')]
-                if len(values) == self.network.layer_sizes[0]:
-                    input_arr = np.array([values])
-                    self.draw_network(ax_network, input_values=input_arr,
-                                     show_weights=True, show_values=True)
-                    output = self.network.activations[-1][0]
-                    ax_network.set_title(f'Forward Pass | Output: {output[0]:.4f}',
-                                       color=self.text_color, fontsize=14, fontweight='bold', pad=10)
-                    fig.canvas.draw_idle()
-            except:
-                pass
+                input_text = text_input.text.strip()
+                values = [float(x.strip()) for x in input_text.split(',')]
+
+                expected_inputs = self.network.layer_sizes[0]
+                if len(values) != expected_inputs:
+                    update_status(f'Error: Expected {expected_inputs} values, got {len(values)}')
+                    return
+
+                input_arr = np.array([values])
+                self.draw_network(ax_network, input_values=input_arr,
+                                 show_weights=True, show_values=True)
+                output = self.network.activations[-1][0]
+                output_str = ', '.join([f'{v:.4f}' for v in output])
+                ax_network.set_title(f'Forward Pass | Output: {output_str}',
+                                   color=self.text_color, fontsize=14, fontweight='bold', pad=10)
+                update_status(f'Output: {output_str}')
+                fig.canvas.draw_idle()
+            except ValueError as e:
+                update_status(f'Error: Invalid input format. Use comma-separated numbers.')
+            except Exception as e:
+                update_status(f'Error: {str(e)[:50]}')
 
         def on_slider_change(val):
-            """Handle slider changes."""
-            update_display()
+            """Handle slider changes with debouncing."""
+            if not state['is_training']:
+                update_display(update_graphs=True)
 
         # Connect callbacks
         btn_train.on_clicked(on_train)
@@ -578,7 +747,8 @@ class NetworkVisualizer:
         slider_sample.on_changed(on_slider_change)
 
         # Initial display
-        update_display()
+        update_display(force_redraw=True)
+        update_status('Ready! Click "Train" to start.')
 
         # Add title
         fig.suptitle('Interactive Neural Network Visualization',
@@ -608,16 +778,17 @@ class ForwardPropagationAnimator:
         self.network = network
         self.visualizer = visualizer
 
-    def animate_forward_pass(self, input_values, interval=500):
+    def animate_forward_pass(self, input_values, interval=300):
         """
         Animate forward propagation step by step.
+        Optimized for smooth animation performance.
 
         Parameters:
         -----------
         input_values : ndarray
             Input values to propagate
         interval : int
-            Milliseconds between frames
+            Milliseconds between frames (default: 300ms for smoother animation)
         """
         if input_values.ndim == 1:
             input_values = input_values.reshape(1, -1)
@@ -629,7 +800,12 @@ class ForwardPropagationAnimator:
         fig, ax = plt.subplots(figsize=(14, 8), facecolor=self.visualizer.background_color)
 
         # Animation state
-        state = {'layer': 0, 'neuron': 0, 'phase': 'neuron'}
+        state = {'layer': 0, 'neuron': 0, 'initialized': False}
+
+        # Store reference to info text for updating (avoids text accumulation)
+        info_text = ax.text(0.5, 1.05, '', transform=ax.transAxes, ha='center', va='bottom',
+                           fontsize=12, color=self.visualizer.text_color,
+                           bbox=dict(boxstyle='round', facecolor=self.visualizer.highlight_color, alpha=0.8))
 
         def get_highlight_path(layer, neuron):
             """Get path to highlight for current state."""
@@ -650,18 +826,18 @@ class ForwardPropagationAnimator:
             # Get current highlight path
             path = get_highlight_path(layer, neuron)
 
-            # Draw network with highlight
+            # Draw network with highlight (first frame initializes, rest updates)
+            force_redraw = not state['initialized']
             self.visualizer.draw_network(ax, highlight_path=path,
                                         input_values=input_values,
-                                        show_weights=True, show_values=True)
+                                        show_weights=True, show_values=True,
+                                        force_redraw=force_redraw)
+            state['initialized'] = True
 
-            # Add info text
+            # Update info text (reuse existing text object)
             if layer < len(self.network.layer_sizes):
                 activation = self.network.activations[layer][0, neuron] if layer < len(self.network.activations) else 0
-                ax.text(0.5, 1.05, f'Layer {layer} | Neuron {neuron} | Activation: {activation:.4f}',
-                       transform=ax.transAxes, ha='center', va='bottom',
-                       fontsize=12, color=self.visualizer.text_color,
-                       bbox=dict(boxstyle='round', facecolor=self.visualizer.highlight_color, alpha=0.8))
+                info_text.set_text(f'Layer {layer} | Neuron {neuron} | Activation: {activation:.4f}')
 
             # Update state for next frame
             state['neuron'] += 1
@@ -669,7 +845,7 @@ class ForwardPropagationAnimator:
                 state['neuron'] = 0
                 state['layer'] += 1
 
-            return []
+            return [info_text]
 
         # Calculate total frames
         total_frames = sum(self.network.layer_sizes)
